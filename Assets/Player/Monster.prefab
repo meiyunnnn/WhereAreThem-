@@ -966,6 +966,22 @@ PrefabInstance:
     serializedVersion: 3
     m_TransformParent: {fileID: 0}
     m_Modifications:
+    - target: {fileID: 185985143366225761, guid: 71749f7937044aa40952e18b3d25c436, type: 3}
+      propertyPath: m_fontAsset
+      value: 
+      objectReference: {fileID: 11400000, guid: 9513df9617519374d912228dac644c3e, type: 2}
+    - target: {fileID: 185985143366225761, guid: 71749f7937044aa40952e18b3d25c436, type: 3}
+      propertyPath: m_sharedMaterial
+      value: 
+      objectReference: {fileID: 8025118318078004023, guid: 9513df9617519374d912228dac644c3e, type: 2}
+    - target: {fileID: 185985143366225761, guid: 71749f7937044aa40952e18b3d25c436, type: 3}
+      propertyPath: m_VerticalAlignment
+      value: 512
+      objectReference: {fileID: 0}
+    - target: {fileID: 185985143366225761, guid: 71749f7937044aa40952e18b3d25c436, type: 3}
+      propertyPath: m_hasFontAssetChanged
+      value: 0
+      objectReference: {fileID: 0}
     - target: {fileID: 223846349304360053, guid: 71749f7937044aa40952e18b3d25c436, type: 3}
       propertyPath: m_Type
       value: 0
@@ -1008,7 +1024,7 @@ PrefabInstance:
       objectReference: {fileID: 7402938736656930496}
     - target: {fileID: 1504671168842108493, guid: 71749f7937044aa40952e18b3d25c436, type: 3}
       propertyPath: GlobalObjectIdHash
-      value: 390152031
+      value: 2583440424
       objectReference: {fileID: 0}
     - target: {fileID: 1504671168842108493, guid: 71749f7937044aa40952e18b3d25c436, type: 3}
       propertyPath: InScenePlacedSourceGlobalObjectIdHash
@@ -1395,6 +1411,9 @@ PrefabInstance:
       addedObject: {fileID: 723145225606511720}
     m_AddedComponents:
     - targetCorrespondingSourceObject: {fileID: 2389683946893718848, guid: 71749f7937044aa40952e18b3d25c436, type: 3}
+      insertIndex: 1
+      addedObject: {fileID: 677991366080758635}
+    - targetCorrespondingSourceObject: {fileID: 2389683946893718848, guid: 71749f7937044aa40952e18b3d25c436, type: 3}
       insertIndex: -1
       addedObject: {fileID: 5103473251126026417}
     - targetCorrespondingSourceObject: {fileID: 2389683946893718848, guid: 71749f7937044aa40952e18b3d25c436, type: 3}
@@ -1406,15 +1425,35 @@ PrefabInstance:
     - targetCorrespondingSourceObject: {fileID: 2389683946893718848, guid: 71749f7937044aa40952e18b3d25c436, type: 3}
       insertIndex: -1
       addedObject: {fileID: 3774776683685013892}
-    - targetCorrespondingSourceObject: {fileID: 2389683946893718848, guid: 71749f7937044aa40952e18b3d25c436, type: 3}
-      insertIndex: -1
-      addedObject: {fileID: 677991366080758635}
   m_SourcePrefab: {fileID: 100100000, guid: 71749f7937044aa40952e18b3d25c436, type: 3}
 --- !u!1 &1173796809025027970 stripped
 GameObject:
   m_CorrespondingSourceObject: {fileID: 2389683946893718848, guid: 71749f7937044aa40952e18b3d25c436, type: 3}
   m_PrefabInstance: {fileID: 3558957622241643202}
   m_PrefabAsset: {fileID: 0}
+--- !u!136 &677991366080758635
+CapsuleCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1173796809025027970}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 2
+  m_Radius: 0.7344278
+  m_Height: 4.9652057
+  m_Direction: 1
+  m_Center: {x: -0.056598656, y: 0.8814618, z: -7.245096e-11}
 --- !u!114 &5103473251126026417
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1469,29 +1508,6 @@ MonoBehaviour:
   spectatorOffset: {x: 0, y: 3, z: -6}
   followSmoothing: 8
   lookAtHeightOffset: 1.5
---- !u!136 &677991366080758635
-CapsuleCollider:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1173796809025027970}
-  m_Material: {fileID: 0}
-  m_IncludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_ExcludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_LayerOverridePriority: 0
-  m_IsTrigger: 0
-  m_ProvidesContacts: 0
-  m_Enabled: 1
-  serializedVersion: 2
-  m_Radius: 1.0354307
-  m_Height: 4.9383774
-  m_Direction: 1
-  m_Center: {x: -0.0873068, y: -1.8, z: -3.74005e-12}
 --- !u!4 &3244532398081560002 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 2046059333011375872, guid: 71749f7937044aa40952e18b3d25c436, type: 3}
