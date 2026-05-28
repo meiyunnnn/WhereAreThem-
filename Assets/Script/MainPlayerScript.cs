@@ -77,6 +77,14 @@ public class MainPlayerScript : NetworkBehaviour
     private PlayerPowerupReceiver _powerupReceiver;
     private Coroutine _monsterRefRetryCoroutine;
 
+    [Header("Animation")]
+    public Animator characterAnimator;
+    public float speedDampTime = 0.1f;
+
+    private static readonly int SpeedHash = Animator.StringToHash("Speed");
+    private static readonly int AttackHash = Animator.StringToHash("Attack");
+    private static readonly int GroundedHash = Animator.StringToHash("Grounded");
+
     public override void OnNetworkSpawn()
     {
         rb = GetComponent<Rigidbody>();
@@ -118,6 +126,8 @@ public class MainPlayerScript : NetworkBehaviour
             // Enable local camera and Input
             if (cameraTransform != null) cameraTransform.gameObject.SetActive(true);
             if (playerInput != null) playerInput.enabled = true;
+            if (characterAnimator == null)
+                characterAnimator = GetComponentInChildren<Animator>();
 
             currentMeshTransform = playerVisualBody; // Default target
 
@@ -435,48 +445,56 @@ public class MainPlayerScript : NetworkBehaviour
             ResetToHumanServerRpc();
         }
     }
-
     private void AttemptAttack()
     {
         PlayerStateSync myState = GetComponent<PlayerStateSync>();
+        characterAnimator?.SetTrigger(AttackHash);
 
-        if (myState != null && myState.RoleIndex.Value == 1)
+        if (myState == null || myState.RoleIndex.Value != 1) return;
+
+        Debug.Log("Monster Attempting Attack!");
+        if (cameraTransform == null) return;
+
+        Ray ray = new Ray(cameraTransform.position, cameraTransform.forward);
+        RaycastHit[] hits = Physics.RaycastAll(ray, attackRange);
+        bool hitSomeone = false;
+
+        foreach (RaycastHit hit in hits)
         {
-            Debug.Log("Monster Attempting Attack!");
-            if (cameraTransform != null)
+            // ── ตี Prop ที่ไม่ใช่ Player → เสียเลือด 10 ──
+            if (hit.collider.CompareTag("PropNotPlayer"))
             {
-                Ray ray = new Ray(cameraTransform.position, cameraTransform.forward);
-                RaycastHit[] hits = Physics.RaycastAll(ray, attackRange);
-                bool hitSomeone = false;
+                Debug.Log("[Attack] Hit PropNotPlayer — Monster loses 10 HP");
+                myState.TakeDamageMonsterServerRpc(10);
+                hitSomeone = true;
+                break;
+            }
 
-                foreach (RaycastHit hit in hits)
+            // ── ตี Survivor ──
+            PlayerStateSync targetState = hit.collider.GetComponentInParent<PlayerStateSync>();
+            if (targetState == null)
+                targetState = hit.collider.transform.root.GetComponentInChildren<PlayerStateSync>();
+
+            if (targetState != null && targetState != myState && targetState.RoleIndex.Value == 0)
+            {
+                Debug.Log($"[Attack] Hit Survivor! Dealing {attackDamage} damage.");
+                targetState.TakeDamageServerRpc(attackDamage);
+
+                // ── Survivor ตาย → ฟื้น HP Monster 30 ──
+                if (targetState.Health.Value - attackDamage <= 0)
                 {
-                    PlayerStateSync targetState = hit.collider.GetComponentInParent<PlayerStateSync>();
-                    if (targetState == null)
-                    {
-                        targetState = hit.collider.transform.root.GetComponentInChildren<PlayerStateSync>();
-                    }
-
-                    if (targetState != null && targetState != myState)
-                    {
-                        if (targetState.RoleIndex.Value == 0)
-                        {
-                            Debug.Log($"Hit Survivor! Dealing {attackDamage} damage.");
-                            targetState.TakeDamageServerRpc(attackDamage);
-                            hitSomeone = true;
-                            break;
-                        }
-                    }
+                    Debug.Log("[Attack] Survivor killed! Monster heals 30 HP");
+                    myState.HealServerRpc(30);
                 }
 
-                if (!hitSomeone && hits.Length > 0)
-                {
-                    Debug.Log("Hit nothing actionable (or self/wall).");
-                }
+                hitSomeone = true;
+                break;
             }
         }
-    }
 
+        if (!hitSomeone && hits.Length > 0)
+            Debug.Log("Hit nothing actionable (or self/wall).");
+    }
     private void HandlePropTransformation()
     {
         Debug.Log("[PropHunt] Entered HandlePropTransformation function");
@@ -704,6 +722,8 @@ public class MainPlayerScript : NetworkBehaviour
         {
             Look();
         }
+        UpdateAnimation();
+
     }
 
     private void FixedUpdate()
@@ -758,6 +778,20 @@ public class MainPlayerScript : NetworkBehaviour
             cameraTransform.localEulerAngles = camEuler;
         }
     }
+    private void UpdateAnimation()
+    {
+        if (characterAnimator == null) return;
+
+        // Speed → Blend Tree
+        Vector3 horizontalVel = new Vector3(rb.velocity.x, 0f, rb.velocity.z);
+        float normalised = Mathf.Clamp01(horizontalVel.magnitude / sprintSpeed);
+        characterAnimator.SetFloat(SpeedHash, normalised, speedDampTime, Time.deltaTime);
+
+        // Grounded
+        Vector3 origin = transform.position + Vector3.up * 0.1f;
+        bool grounded = Physics.Raycast(origin, Vector3.down, groundCheckDistance, groundLayer);
+        characterAnimator.SetBool(GroundedHash, grounded);
+    }
 
     private void Move()
     {
@@ -790,4 +824,5 @@ public class MainPlayerScript : NetworkBehaviour
             playerVisualBody.rotation = Quaternion.Slerp(playerVisualBody.rotation, targetRotation, Time.deltaTime * bodyRotationSpeed);
         }
     }
+
 }

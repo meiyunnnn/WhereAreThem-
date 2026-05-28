@@ -24,6 +24,10 @@ public class PhaseUI : MonoBehaviour
     public string hideMonsterMessage = "Locked in the void…  {0}s";
     public string hideSurvivorMessage = "Hide!  {0}s";
 
+    [Header("Blackout (Monster only)")]
+    public GameObject blackoutPanel;
+
+
     private bool _subscribedRound;
     private int _localRole = -1;
 
@@ -87,26 +91,39 @@ public class PhaseUI : MonoBehaviour
             case RoundPhase.MonsterPreview:
                 SetText(string.Format(previewMessage, timer));
                 SetVisible(true);
+                SetBlackout(false); // ไม่ปิดตาช่วง preview
                 break;
 
             case RoundPhase.SurvivorHide:
-                if (_localRole == 1)
+                if (_localRole == 1) // Monster
+                {
                     SetText(string.Format(hideMonsterMessage, timer));
-                else
+                    SetBlackout(true); // ปิดตา Monster
+                }
+                else // Survivor
+                {
                     SetText(string.Format(hideSurvivorMessage, timer));
+                    SetBlackout(false);
+                }
                 SetVisible(true);
                 break;
 
             default:
                 SetVisible(false);
+                SetBlackout(false); // เคลียร์ทุกครั้งที่ phase อื่น
                 break;
         }
     }
-
     private void SetText(string s)
     {
         if (phaseText != null) phaseText.text = s;
     }
+    private void SetBlackout(bool v)
+    {
+        if (blackoutPanel != null && blackoutPanel.activeSelf != v)
+            blackoutPanel.SetActive(v);
+    }
+
 
     // FIX: toggle the TMP renderer's .enabled property instead of GameObject.SetActive,
     // so this script's host GameObject stays alive and its coroutines keep running.

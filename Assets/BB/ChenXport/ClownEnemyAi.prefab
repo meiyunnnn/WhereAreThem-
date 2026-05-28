@@ -964,10 +964,10 @@ MonoBehaviour:
   player: {fileID: 0}
   whatIsGround:
     serializedVersion: 2
-    m_Bits: 8
+    m_Bits: 0
   whatIsPlayer:
     serializedVersion: 2
-    m_Bits: 256
+    m_Bits: 0
   health: 50
   walkPointRange: 8
   waitAtPoints: 1
@@ -993,12 +993,12 @@ MonoBehaviour:
   targetMode: 0
   whatIsObject:
     serializedVersion: 2
-    m_Bits: 16512
+    m_Bits: 0
   useConeSight: 1
   fovAngle: 105
   obstructionMask:
     serializedVersion: 2
-    m_Bits: 9
+    m_Bits: 1
   audioSource: {fileID: 1388488098643900942}
   meleeAttackSFX: {fileID: 8300000, guid: 2117191c41d8c934e98b2770a5bac824, type: 3}
   rangedAttackSFX: {fileID: 0}

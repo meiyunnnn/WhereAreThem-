@@ -31,10 +31,15 @@ public class PlayerStateSync : NetworkBehaviour
     private bool canSpectate = false; // Check if 5-second wait is over
     private Coroutine spectateCoroutine; // Stores the coroutine to cancel it upon respawn
 
+
+    [Header("HP Bar")]
+    public PlayerHPBar hpBar;
+
+
     [Header("Game Over Settings")]
     public GameObject winUI; // Win UI screen (for Hunter/Monster)
     public GameObject loseUI; // Lose UI screen (for Hider/Survivor)
-    
+
     private bool isGameOverSequenceRunning = false; // Prevents multiple Game Over sequence calls
 
     private bool isCursorUnlocked = false; // เก็บสถานะการกด J ปลดล็อกเมาส์
@@ -150,6 +155,21 @@ public class PlayerStateSync : NetworkBehaviour
             Debug.Log($"[Server] Survivor took {damage} damage. Current HP: {Health.Value}");
         }
     }
+    [ServerRpc(RequireOwnership = false)]
+    public void HealServerRpc(int amount)
+    {
+        if (RoleIndex.Value != 1) return; // เฉพาะ Monster เท่านั้น
+        Health.Value = Mathf.Min(Health.Value + amount, 100);
+        Debug.Log($"[Server] Monster healed {amount}. Current HP: {Health.Value}");
+    }
+
+    [ServerRpc(RequireOwnership = false)]
+    public void TakeDamageMonsterServerRpc(int damage)
+    {
+        if (RoleIndex.Value != 1) return; // เฉพาะ Monster เท่านั้น
+        Health.Value = Mathf.Max(Health.Value - damage, 0);
+        Debug.Log($"[Server] Monster took {damage} damage. Current HP: {Health.Value}");
+    }
     // ==========================================
 
     private void Update()
@@ -255,13 +275,12 @@ public class PlayerStateSync : NetworkBehaviour
 
     private void OnHealthChanged(int oldValue, int newValue)
     {
-        if (RoleIndex.Value == 0 && IsOwner)
-        {
-            UpdateHPUI(newValue);
-        }
+        if (IsOwner && hpBar != null)
+            hpBar.UpdateHP(newValue);
 
-        // VFX: spawn hit effect when survivor takes damage (HP went down).
-        // Runs on every client because OnValueChanged fires everywhere.
+        if (RoleIndex.Value == 0 && IsOwner)
+            UpdateHPUI(newValue);
+
         if (RoleIndex.Value == 0 && newValue < oldValue && hitVfxPrefab != null)
         {
             Vector3 spawnPos = transform.position + hitVfxOffset;
@@ -269,19 +288,20 @@ public class PlayerStateSync : NetworkBehaviour
             Destroy(vfx, hitVfxLifetime);
         }
 
-        // Check if out of health or respawned (Survivor only)
         if (RoleIndex.Value == 0)
         {
-            if (newValue <= 0 && oldValue > 0)
-                HandleDeath();
-            else if (newValue > 0 && oldValue <= 0) 
-                HandleRespawn();
+            if (newValue <= 0 && oldValue > 0) HandleDeath();
+            else if (newValue > 0 && oldValue <= 0) HandleRespawn();
         }
 
-        // Check game over status whenever health changes (someone dies)
+        // ── เพิ่มใหม่: Monster ตาย ──
+        if (RoleIndex.Value == 1)
+        {
+            if (newValue <= 0 && oldValue > 0) HandleMonsterDeath();
+        }
+
         CheckGameOver();
     }
-
     private void TriggerTimeUpGameOver()
     {
         if (isGameOverSequenceRunning) return;
@@ -293,6 +313,30 @@ public class PlayerStateSync : NetworkBehaviour
                 // ส่งค่า true เพราะ Hiders (ฝ่ายแอบ) เป็นฝ่ายชนะเมื่อเวลาหมด
                 localPlayer.StartCoroutine(localPlayer.HandleGameOverSequence(true)); 
             }
+        }
+    }
+
+    private void HandleDeath()
+    {
+        foreach (var obj in modelsToHide)
+            if (obj != null) obj.SetActive(false);
+
+        if (nameLabel != null) nameLabel.gameObject.SetActive(false);
+
+        Collider col = GetComponent<Collider>();
+        if (col != null) col.enabled = false;
+
+        Rigidbody rb = GetComponent<Rigidbody>();
+        if (rb != null) rb.isKinematic = true;
+
+        if (IsOwner)
+        {
+            if (deadUI != null) deadUI.SetActive(true);
+            foreach (var script in scriptsToDisable)
+                if (script != null) script.enabled = false;
+
+            if (spectateCoroutine != null) StopCoroutine(spectateCoroutine);
+            spectateCoroutine = StartCoroutine(WaitBeforeSpectate(5f));
         }
     }
 
@@ -320,29 +364,43 @@ public class PlayerStateSync : NetworkBehaviour
         statusRenderer.material.color = active ? Color.red : Color.white;
     }
 
-    private void HandleDeath()
+    private void HandleMonsterDeath()
     {
-        // Hide models and disable Collider so everyone on the server sees it disappear
+        if (!IsOwner) return;
+
         foreach (var obj in modelsToHide)
             if (obj != null) obj.SetActive(false);
 
-        if (nameLabel != null) nameLabel.gameObject.SetActive(false); // Hide dead player's name
+        foreach (var script in scriptsToDisable)
+            if (script != null) script.enabled = false;
+
+        // ล็อกตัวละครให้ขยับไม่ได้
+        Rigidbody rb = GetComponent<Rigidbody>();
+        if (rb != null) rb.isKinematic = true;
 
         Collider col = GetComponent<Collider>();
         if (col != null) col.enabled = false;
 
-        Rigidbody rb = GetComponent<Rigidbody>();
-        if (rb != null) rb.isKinematic = true;
+        var mainScript = GetComponent<MainPlayerScript>();
+        if (mainScript != null && mainScript.monsterUI != null)
+            mainScript.monsterUI.SetActive(false);
 
-        if (IsOwner)
+        if (deadUI != null) deadUI.SetActive(true);
+
+        if (spectateCoroutine != null) StopCoroutine(spectateCoroutine);
+        spectateCoroutine = StartCoroutine(MonsterDeathThenDestroy());
+    }
+
+    private IEnumerator MonsterDeathThenDestroy()
+    {
+        yield return new WaitForSeconds(5f);
+
+        if (deadUI != null) deadUI.SetActive(false);
+
+        // Destroy เฉพาะ Server เป็นคนสั่ง
+        if (IsServer)
         {
-            if (deadUI != null) deadUI.SetActive(true);
-            foreach (var script in scriptsToDisable)
-                if (script != null) script.enabled = false;
-            
-            // Start 5-second countdown before spectating
-            if (spectateCoroutine != null) StopCoroutine(spectateCoroutine);
-            spectateCoroutine = StartCoroutine(WaitBeforeSpectate(5f));
+            GetComponent<NetworkObject>()?.Despawn(true);
         }
     }
 
@@ -561,4 +619,5 @@ public class PlayerStateSync : NetworkBehaviour
             SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
         }
     }
+
 }

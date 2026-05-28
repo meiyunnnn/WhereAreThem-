@@ -159,6 +159,7 @@ MonoBehaviour:
   spottedTriggerName: PlayerDetect
   meleeTriggerName: Attack
   rangedTriggerName: AttackRanged
+  objectAttackTriggerName: ObjAttack
   gizmoColors:
     patrolRangeColor: {r: 0.5, g: 0.5, b: 0.5, a: 1}
     sightRangeColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
@@ -167,19 +168,22 @@ MonoBehaviour:
     objectAttackRangeColor: {r: 1, g: 0, b: 1, a: 1}
     fovColor: {r: 0, g: 1, b: 1, a: 1}
   itemToDrop: {fileID: 0}
+  allItemPrefabs: []
   agent: {fileID: 8698642889590241077}
   player: {fileID: 0}
   whatIsGround:
     serializedVersion: 2
-    m_Bits: 8
+    m_Bits: 0
   whatIsPlayer:
     serializedVersion: 2
-    m_Bits: 256
+    m_Bits: 0
   health: 50
   walkPointRange: 10
   waitAtPoints: 1
   waitTimeRange: {x: 5, y: 10}
   spottedDuration: 1.59
+  lastSeenPosition: {x: 0, y: 0, z: 0}
+  searchDuration: 3
   attackStyle: 1
   timeBetweenAttacks: 1.25
   sightRange: 1.1
@@ -198,9 +202,24 @@ MonoBehaviour:
   targetMode: 0
   whatIsObject:
     serializedVersion: 2
-    m_Bits: 9
+    m_Bits: 1
   useConeSight: 1
   fovAngle: 180
   obstructionMask:
     serializedVersion: 2
     m_Bits: 0
+  audioSource: {fileID: 0}
+  meleeAttackSFX: {fileID: 0}
+  rangedAttackSFX: {fileID: 0}
+  hitPlayerSFX: {fileID: 0}
+  idleSource: {fileID: 0}
+  idleClips: []
+  idleMinDelay: 3
+  idleMaxDelay: 8
+  footstepSource: {fileID: 0}
+  walkFootsteps: []
+  runFootsteps: []
+  footstepIntervalWalk: 0.6
+  footstepIntervalRun: 0.35
+  soundManager: {fileID: 0}
+  monsterDeathParticle: {fileID: 0}
