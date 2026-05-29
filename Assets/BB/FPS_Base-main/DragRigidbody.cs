@@ -162,7 +162,7 @@ public class DragRigidbody : MonoBehaviour
     {
         return new JointDrive
         {
-            mode = JointDriveMode.Position,
+
             positionSpring = force,
             positionDamper = damping,
             maximumForce = Mathf.Infinity

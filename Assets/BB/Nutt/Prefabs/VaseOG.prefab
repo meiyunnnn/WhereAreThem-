@@ -64,6 +64,10 @@ PrefabInstance:
       propertyPath: m_Name
       value: VaseOG
       objectReference: {fileID: 0}
+    - target: {fileID: 919132149155446097, guid: 0c354b0392fffb849a3ea7dce8499c91, type: 3}
+      propertyPath: m_TagString
+      value: Prop
+      objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []

@@ -28,7 +28,7 @@ public class MainPlayerScript : NetworkBehaviour
     public float minFOV = 30f;            // Closest FOV (1st Person)
     public float maxFOV = 75f;            // Furthest FOV (1st Person)
     public float zoomSmoothTime = 10f;    // Smooth speed
-    
+
     private Vector2 lookInput;
     private float verticalLookRotation = 0f;
 
@@ -83,7 +83,6 @@ public class MainPlayerScript : NetworkBehaviour
 
     private static readonly int SpeedHash = Animator.StringToHash("Speed");
     private static readonly int AttackHash = Animator.StringToHash("Attack");
-    private static readonly int GroundedHash = Animator.StringToHash("Grounded");
 
     public override void OnNetworkSpawn()
     {
@@ -212,7 +211,7 @@ public class MainPlayerScript : NetworkBehaviour
                 Cursor.visible = false;
 
                 // Ensure Game Menu is closed when game starts
-                if (GameMenuManager.Instance != null) 
+                if (GameMenuManager.Instance != null)
                     GameMenuManager.Instance.ToggleMenu(false);
             }
 
@@ -244,28 +243,39 @@ public class MainPlayerScript : NetworkBehaviour
         {
             if (next == RoundPhase.MonsterPreview)
             {
-                // VISIBILITY (every client): hide this survivor's body and name tag so the
-                // monster cannot see survivors during preview.
+                // VISIBILITY (every client): hide this survivor's body and name tag.
+                // NOTE: ตัวละครถูก RoundManager teleport ไปที่ survivorLockPosition + locked แล้ว
+                // การซ่อน visual body ที่นี่เป็น layer เพิ่มเติมเพื่อความปลอดภัย
                 if (playerVisualBody != null) playerVisualBody.gameObject.SetActive(false);
                 if (nameTag != null) nameTag.SetActive(false);
 
-                // OWNER-ONLY: start spectating the monster.
+                // OWNER-ONLY: freeze rigidbody ทันทีที่รู้ว่า phase เปลี่ยน
+                // FIX #2: ป้องกัน race condition กับ Relay — phase change NetworkVariable
+                // อาจมาถึง client ก่อน TeleportAndLockClientRpc เล็กน้อย ทำให้มีช่วงสั้นๆ
+                // ที่ survivor ยังขยับได้ก่อนถูก lock การ freeze ทันทีปิดช่องโหว่นี้
                 if (IsOwner)
                 {
-                    Debug.Log("[MainPlayerScript] Survivor entering preview (owner): starting spectator.");
+                    var rb = GetComponent<Rigidbody>();
+                    if (rb != null && !rb.isKinematic)
+                    {
+                        rb.velocity = Vector3.zero;
+                        rb.angularVelocity = Vector3.zero;
+                    }
+                    Debug.Log("[MainPlayerScript] Survivor entering MonsterPreview (owner): rb frozen, body warped to lock pos, starting spectator.");
                     BeginSpectatingMonster();
                 }
             }
             else if (prev == RoundPhase.MonsterPreview && next != RoundPhase.MonsterPreview)
             {
                 // VISIBILITY (every client): restore body and name now that preview is over.
+                // NOTE: RoundManager ได้ teleport survivor กลับไปที่ original spawn + unlock แล้ว
                 if (playerVisualBody != null) playerVisualBody.gameObject.SetActive(true);
                 if (nameTag != null) nameTag.SetActive(true);
 
                 // OWNER-ONLY: stop spectating, restore own camera.
                 if (IsOwner)
                 {
-                    Debug.Log("[MainPlayerScript] Survivor leaving preview (owner): stopping spectator.");
+                    Debug.Log("[MainPlayerScript] Survivor leaving MonsterPreview (owner): warped back to spawn, stopping spectator.");
                     if (_spectatorController != null) _spectatorController.StopSpectating();
                     if (_monsterRefRetryCoroutine != null)
                     {
@@ -324,7 +334,7 @@ public class MainPlayerScript : NetworkBehaviour
 
         // Phase-vs-role: only the active side can act.
         if (phase == RoundPhase.MonsterPreview) return role == 1;  // only monster moves during preview
-        if (phase == RoundPhase.SurvivorHide)   return role == 0;  // only survivors move during hide
+        if (phase == RoundPhase.SurvivorHide) return role == 0;  // only survivors move during hide
         return true; // Active = both sides act
     }
 
@@ -347,7 +357,7 @@ public class MainPlayerScript : NetworkBehaviour
     public void OnJump(InputAction.CallbackContext context)
     {
         if (!IsOwner) return;
-        
+
         PlayerStateSync myState = GetComponent<PlayerStateSync>();
         bool isJUnlocked = myState != null && myState.IsCursorUnlocked;
 
@@ -366,12 +376,12 @@ public class MainPlayerScript : NetworkBehaviour
     {
         // ขยับจุดยิงขึ้นมาเล็กน้อย (0.1f) ป้องกันเส้นจมลงไปใต้พื้น
         Vector3 origin = transform.position + (Vector3.up * 0.1f);
-        
+
         bool isHit = Physics.Raycast(origin, Vector3.down, groundCheckDistance, groundLayer);
-        
+
         // วาดเส้นให้เห็นในหน้าต่าง Scene ตอนทดสอบ (สีเขียว = แตะพื้นโดดได้, สีแดง = ลอยอยู่โดดไม่ได้)
         Debug.DrawRay(origin, Vector3.down * groundCheckDistance, isHit ? Color.green : Color.red, 2f);
-        
+
         return isHit;
     }
 
@@ -462,10 +472,9 @@ public class MainPlayerScript : NetworkBehaviour
         foreach (RaycastHit hit in hits)
         {
             // ── ตี Prop ที่ไม่ใช่ Player → เสียเลือด 10 ──
-            if (hit.collider.CompareTag("PropNotPlayer"))
+            if (hit.collider.CompareTag("Prop"))
             {
-                Debug.Log("[Attack] Hit PropNotPlayer — Monster loses 10 HP");
-                myState.TakeDamageMonsterServerRpc(10);
+                myState.TakeDamageMonsterServerRpc(0);
                 hitSomeone = true;
                 break;
             }
@@ -502,7 +511,7 @@ public class MainPlayerScript : NetworkBehaviour
         {
             // Shoot Ray from the center of the screen (camera)
             Ray ray = new Ray(cameraTransform.position, cameraTransform.forward);
-            
+
             // (Optional) Draw a red Ray in Scene View to show direction (lasts 2 seconds)
             Debug.DrawRay(ray.origin, ray.direction * interactRange, Color.red, 2f);
 
@@ -582,14 +591,14 @@ public class MainPlayerScript : NetworkBehaviour
 
             foreach (Transform child in propVisualContainer)
             {
-                if (child.name.ToLower().Contains(target)) 
+                if (child.name.ToLower().Contains(target))
                 {
                     child.gameObject.SetActive(true);
-                    
+
                     // [Important!] Force position to reset to center + offset
-                    child.localPosition = propPositionOffset; 
+                    child.localPosition = propPositionOffset;
                     currentMeshTransform = child; // Update camera target
-                    
+
                     Debug.Log($"Activated: {child.name} at {child.localPosition}");
                     break;
                 }
@@ -622,17 +631,17 @@ public class MainPlayerScript : NetworkBehaviour
         if (playerVisualBody != null)
         {
             playerVisualBody.gameObject.SetActive(true);
-            
+
             // บังคับให้ MeshRenderer แสดงผล (แก้ปัญหาตัวหายในเครื่องตัวเอง)
             MeshRenderer mr = playerVisualBody.GetComponent<MeshRenderer>();
             if (mr != null) mr.enabled = true;
-            
+
             currentMeshTransform = playerVisualBody; // Reset camera target to human
         }
 
         // Restore name tag now that the human body is back.
         if (nameTag != null) nameTag.SetActive(true);
-        
+
         // 3. เปิด UI เฉพาะของ Survivor กลับมา
         if (IsOwner && survivorUI != null)
         {
@@ -660,14 +669,14 @@ public class MainPlayerScript : NetworkBehaviour
         }
 
         // ออกจากการล็อกเมื่อกด Enter หรือ Escape
-        else if (isTyping && Keyboard.current != null && 
-                 (Keyboard.current.enterKey.wasPressedThisFrame || 
-                  Keyboard.current.numpadEnterKey.wasPressedThisFrame || 
+        else if (isTyping && Keyboard.current != null &&
+                 (Keyboard.current.enterKey.wasPressedThisFrame ||
+                  Keyboard.current.numpadEnterKey.wasPressedThisFrame ||
                   Keyboard.current.escapeKey.wasPressedThisFrame))
         {
             isTyping = false;
         }
-        
+
         PlayerStateSync myState = GetComponent<PlayerStateSync>();
         bool isJUnlocked = myState != null && myState.IsCursorUnlocked;
 
@@ -787,10 +796,6 @@ public class MainPlayerScript : NetworkBehaviour
         float normalised = Mathf.Clamp01(horizontalVel.magnitude / sprintSpeed);
         characterAnimator.SetFloat(SpeedHash, normalised, speedDampTime, Time.deltaTime);
 
-        // Grounded
-        Vector3 origin = transform.position + Vector3.up * 0.1f;
-        bool grounded = Physics.Raycast(origin, Vector3.down, groundCheckDistance, groundLayer);
-        characterAnimator.SetBool(GroundedHash, grounded);
     }
 
     private void Move()
@@ -804,7 +809,7 @@ public class MainPlayerScript : NetworkBehaviour
         right.Normalize();
 
         Vector3 moveDirection = (forward * moveInput.y + right * moveInput.x).normalized;
-        
+
         // เช็คว่ากด Shift วิ่งอยู่ และ ต้องเป็นการกดเดินหน้า (W) เท่านั้น
         bool isActuallySprinting = isSprinting && moveInput.y > 0;
 

@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using Unity.Netcode;
 using UnityEngine;
 
@@ -23,6 +24,10 @@ public class RoundManager : NetworkBehaviour
     [Header("Monster Lock Position")]
     public Vector3 monsterLockPosition = new Vector3(0f, -10f, 0f);
 
+    [Header("Survivor Lock Position")]
+    [Tooltip("ตำแหน่งที่จะ teleport Survivor ทุกคนไปกักไว้ระหว่าง MonsterPreview (เหมือนกับที่ Monster ถูกกักระหว่าง SurvivorHide)")]
+    public Vector3 survivorLockPosition = new Vector3(0f, -20f, 0f);
+
     public NetworkVariable<RoundPhase> CurrentPhase = new NetworkVariable<RoundPhase>(
         RoundPhase.Lobby,
         NetworkVariableReadPermission.Everyone,
@@ -43,6 +48,12 @@ public class RoundManager : NetworkBehaviour
 
     private Vector3 _monsterOriginalSpawn = Vector3.zero;
     private Quaternion _monsterOriginalRotation = Quaternion.identity;
+
+    // FIX #1: ใช้ Dictionary เก็บ spawn position ของ Survivor แต่ละคน
+    // ตำแหน่งจะถูกขอจาก client โดยตรงผ่าน ServerRpc เพื่อหลีกเลี่ยงปัญหา
+    // ClientNetworkTransform stale position บน server ในช่วงที่มี Relay latency
+    private Dictionary<ulong, Vector3> _survivorOriginalSpawns = new Dictionary<ulong, Vector3>();
+
     private Coroutine _tickCoroutine;
     private bool _subscribedToGameTimer = false;
 
@@ -112,7 +123,65 @@ public class RoundManager : NetworkBehaviour
 
         Debug.Log($"[RoundManager] Monster found: clientId={monsterObj.OwnerClientId} originalSpawn={_monsterOriginalSpawn}");
 
+        // FIX #1: ล้าง dict แล้วเริ่ม coroutine ขอ position จาก Survivor ทุกคนก่อน
+        // แทนที่จะอ่าน po.transform.position บน server โดยตรง (ซึ่งอาจ stale กับ Relay)
+        _survivorOriginalSpawns.Clear();
+        StartCoroutine(CollectSpawnsAndTransition());
+    }
+
+    // FIX #1: ขอ position จาก Survivor ทุกคนผ่าน ClientRpc → ServerRpc
+    // แล้วค่อย transition ไป MonsterPreview หลังได้ครบ (หรือ timeout 2 วินาที)
+    private IEnumerator CollectSpawnsAndTransition()
+    {
+        int survivorCount = CountSurvivors();
+        Debug.Log($"[RoundManager] Collecting spawn positions from {survivorCount} survivors...");
+
+        if (survivorCount > 0)
+        {
+            CollectSurvivorPositionsClientRpc();
+
+            float deadline = Time.time + 2f;
+            while (_survivorOriginalSpawns.Count < survivorCount && Time.time < deadline)
+                yield return null;
+
+            Debug.Log($"[RoundManager] Collected {_survivorOriginalSpawns.Count}/{survivorCount} survivor positions. Transitioning.");
+        }
+
         TransitionTo(RoundPhase.MonsterPreview);
+    }
+
+    // Server → ทุก client: ให้ Survivor report position ของตัวเองกลับมา
+    [ClientRpc]
+    private void CollectSurvivorPositionsClientRpc()
+    {
+        var myPlayer = NetworkManager.Singleton.LocalClient?.PlayerObject;
+        if (myPlayer == null) return;
+
+        var state = myPlayer.GetComponent<PlayerStateSync>();
+        if (state == null || state.RoleIndex.Value != 0) return; // เฉพาะ Survivor เท่านั้น
+
+        ReportMyPositionServerRpc(myPlayer.transform.position);
+    }
+
+    // Survivor client → Server: ส่ง position ที่ถูกต้องมาเก็บไว้
+    [ServerRpc(RequireOwnership = false)]
+    private void ReportMyPositionServerRpc(Vector3 pos, ServerRpcParams rpcParams = default)
+    {
+        ulong senderId = rpcParams.Receive.SenderClientId;
+        _survivorOriginalSpawns[senderId] = pos;
+        Debug.Log($"[RoundManager] Received spawn position from survivor clientId={senderId}: {pos}");
+    }
+
+    // นับจำนวน Survivor ที่ connected อยู่
+    private int CountSurvivors()
+    {
+        int count = 0;
+        foreach (var kv in NetworkManager.Singleton.ConnectedClients)
+        {
+            var state = kv.Value.PlayerObject?.GetComponent<PlayerStateSync>();
+            if (state != null && state.RoleIndex.Value == 0) count++;
+        }
+        return count;
     }
 
     private void TransitionTo(RoundPhase next)
@@ -132,14 +201,16 @@ public class RoundManager : NetworkBehaviour
         {
             case RoundPhase.MonsterPreview:
                 PhaseTimer.Value = previewDurationSec;
-                Debug.Log($"[RoundManager] Starting MonsterPreview tick: PhaseTimer={PhaseTimer.Value}");
+                Debug.Log($"[RoundManager] Starting MonsterPreview tick: PhaseTimer={PhaseTimer.Value}. Teleporting survivors to {survivorLockPosition}.");
+                TeleportAllSurvivors(survivorLockPosition, locked: true);
                 _tickCoroutine = StartCoroutine(TickPhaseTimer(RoundPhase.SurvivorHide));
                 break;
 
             case RoundPhase.SurvivorHide:
                 PhaseTimer.Value = hideDurationSec;
-                Debug.Log($"[RoundManager] Starting SurvivorHide tick: PhaseTimer={PhaseTimer.Value}. Teleporting monster to {monsterLockPosition}.");
+                Debug.Log($"[RoundManager] Starting SurvivorHide tick: PhaseTimer={PhaseTimer.Value}. Teleporting monster to {monsterLockPosition}. Warping survivors back to spawn.");
                 TeleportMonster(monsterLockPosition, locked: true);
+                TeleportAllSurvivorsToSpawns();
                 _tickCoroutine = StartCoroutine(TickPhaseTimer(RoundPhase.Active));
                 break;
 
@@ -190,6 +261,62 @@ public class RoundManager : NetworkBehaviour
             Send = new ClientRpcSendParams { TargetClientIds = new[] { monsterObj.OwnerClientId } }
         };
         receiver.TeleportAndLockClientRpc(pos, locked, rpcParams);
+    }
+
+    // Teleport Survivor ทุกคนไปที่ตำแหน่งที่กำหนด (locked=true = kinematic ล็อกไม่ให้ขยับ)
+    private void TeleportAllSurvivors(Vector3 pos, bool locked)
+    {
+        foreach (var kv in NetworkManager.Singleton.ConnectedClients)
+        {
+            var po = kv.Value.PlayerObject;
+            if (po == null) continue;
+            var state = po.GetComponent<PlayerStateSync>();
+            if (state == null || state.RoleIndex.Value != 0) continue;
+
+            var receiver = po.GetComponent<PlayerPowerupReceiver>();
+            if (receiver == null)
+            {
+                Debug.LogWarning($"[RoundManager] TeleportAllSurvivors: client {kv.Key} has no PlayerPowerupReceiver.");
+                continue;
+            }
+            var rpcParams = new ClientRpcParams
+            {
+                Send = new ClientRpcSendParams { TargetClientIds = new[] { po.OwnerClientId } }
+            };
+            receiver.TeleportAndLockClientRpc(pos, locked, rpcParams);
+            Debug.Log($"[RoundManager] TeleportAllSurvivors: clientId={kv.Key} -> {pos} locked={locked}");
+        }
+    }
+
+    // Warp Survivor แต่ละคนกลับไปที่ตำแหน่ง spawn ต้นฉบับที่รับมาจาก client และ unlock
+    private void TeleportAllSurvivorsToSpawns()
+    {
+        foreach (var kv in NetworkManager.Singleton.ConnectedClients)
+        {
+            var po = kv.Value.PlayerObject;
+            if (po == null) continue;
+            var state = po.GetComponent<PlayerStateSync>();
+            if (state == null || state.RoleIndex.Value != 0) continue;
+
+            var receiver = po.GetComponent<PlayerPowerupReceiver>();
+            if (receiver == null)
+            {
+                Debug.LogWarning($"[RoundManager] TeleportAllSurvivorsToSpawns: client {kv.Key} has no PlayerPowerupReceiver.");
+                continue;
+            }
+
+            // ใช้ตำแหน่งที่ client รายงานมาตอน BeginRound ถ้ามี ไม่งั้น fallback ตำแหน่งปัจจุบัน server-side
+            Vector3 spawnPos = _survivorOriginalSpawns.TryGetValue(kv.Key, out var orig)
+                ? orig
+                : po.transform.position;
+
+            var rpcParams = new ClientRpcParams
+            {
+                Send = new ClientRpcSendParams { TargetClientIds = new[] { po.OwnerClientId } }
+            };
+            receiver.TeleportAndLockClientRpc(spawnPos, false, rpcParams);
+            Debug.Log($"[RoundManager] TeleportAllSurvivorsToSpawns: clientId={kv.Key} -> {spawnPos}");
+        }
     }
 
     private void SubscribeToGameTimer()

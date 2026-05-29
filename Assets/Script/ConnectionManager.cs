@@ -15,11 +15,6 @@ using QFSW.QC;
 using TMPro;
 using UnityEngine.UI;
 
-// Connection data payload format: "username|charIndex"
-// This script handles both:
-//   A) Direct Relay  — Relay Host / Relay Client buttons (enter code manually)
-//   B) Lobby + Relay — Lobby Host / Lobby Client buttons (auto Quick Join, no code needed)
-
 public class ConnectionManager : MonoBehaviour
 {
     // ─────────────────────────────────────────────
@@ -37,7 +32,7 @@ public class ConnectionManager : MonoBehaviour
     [SerializeField] private Transform[] monsterSpawnPoints;
     [SerializeField] private bool useRandomSpawn = false;
     private int nextSurvivorSpawnIndex = 0;
-    private int nextMonsterSpawnIndex  = 0;
+    private int nextMonsterSpawnIndex = 0;
 
     [SerializeField] private List<uint> alternatePlayerPrefabHashes = new List<uint>();
 
@@ -46,53 +41,56 @@ public class ConnectionManager : MonoBehaviour
     // ─────────────────────────────────────────────
     [Header("UI - Shared")]
     [SerializeField] private TMP_InputField usernameInput;
-    [SerializeField] private GameObject     loginPanel;
-    [SerializeField] private GameObject     leaveButton;
-    [SerializeField] public  TMP_Text       errorText;
-    [SerializeField] public  Button         clientButton;   // Relay Client button
+    [SerializeField] private GameObject loginPanel;
+    [SerializeField] private GameObject leaveButton;
+    [SerializeField] public TMP_Text errorText;
+    [SerializeField] public Button clientButton;
 
     // ─────────────────────────────────────────────
     //  Inspector — Direct Relay UI
     // ─────────────────────────────────────────────
     [Header("UI - Direct Relay")]
-    [SerializeField] private TMP_Text       relayHostJoinCodeText;
+    [SerializeField] private TMP_Text relayHostJoinCodeText;
     [SerializeField] private TMP_InputField relayClientJoinCodeInput;
-    [SerializeField] private GameObject     characterPanel;
-    [SerializeField] private Button[]       characterButtons;
+    [SerializeField] private GameObject characterPanel;
+    [SerializeField] private Button[] characterButtons;
 
     // ─────────────────────────────────────────────
     //  Inspector — Lobby UI
     // ─────────────────────────────────────────────
     [Header("UI - Lobby")]
-    [Tooltip("ช่อง input สำหรับ Client กรอก Lobby Code (ถ้าปล่อยว่าง = Quick Join อัตโนมัติ)")]
     [SerializeField] private TMP_InputField lobbyJoinCodeInput;
-    [Tooltip("Text แสดง Lobby Code ให้ Host เห็น")]
-    [SerializeField] private TMP_Text       lobbyCodeDisplayText;
-    [Tooltip("Text แสดงสถานะ Lobby")]
-    [SerializeField] private TMP_Text       lobbyStatusText;
-    [SerializeField] private Button         lobbyHostButton;
-    [SerializeField] private Button         lobbyClientButton;
+    [SerializeField] private TMP_Text lobbyCodeDisplayText;
+    [SerializeField] private TMP_Text lobbyStatusText;
+    [SerializeField] private Button lobbyHostButton;
+    [SerializeField] private Button lobbyClientButton;
 
     // ─────────────────────────────────────────────
     //  Inspector — Lobby Settings
     // ─────────────────────────────────────────────
     [Header("Lobby Settings")]
-    [SerializeField] private string lobbyName  = "MyGameLobby";
-    [SerializeField] private int    maxPlayers = 4;
+    [SerializeField] private string lobbyName = "MyGameLobby";
+    [SerializeField] private int maxPlayers = 4;
+
+    // ─────────────────────────────────────────────
+    //  Relay Region
+    // ─────────────────────────────────────────────
+    // *** ap-southeast-1 = Singapore ใกล้ไทยที่สุด ***
+    private const string RELAY_REGION = "asia-southeast1";
 
     // ─────────────────────────────────────────────
     //  Private State — Direct Relay
     // ─────────────────────────────────────────────
-    private string _relayJoinCode   = "";
-    private bool   _startAsHost     = false;
-    private int    _pendingCharIndex = 0;
-    private int    _hostCharIndex    = 0;
+    private string _relayJoinCode = "";
+    private bool _startAsHost = false;
+    private int _pendingCharIndex = 0;
+    private int _hostCharIndex = 0;
     public void SetHostCharIndex(int index) => _hostCharIndex = index;
-    private bool   _isLeaving        = false;
+    private bool _isLeaving = false;
 
-    private readonly Dictionary<ulong, int>    _clientIdToCharIndex = new Dictionary<ulong, int>();
-    private readonly HashSet<string>           _connectedNames      = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<ulong, string> _clientIdToName      = new Dictionary<ulong, string>();
+    private readonly Dictionary<ulong, int> _clientIdToCharIndex = new Dictionary<ulong, int>();
+    private readonly HashSet<string> _connectedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<ulong, string> _clientIdToName = new Dictionary<ulong, string>();
 
     // ─────────────────────────────────────────────
     //  Private State — Lobby
@@ -101,8 +99,8 @@ public class ConnectionManager : MonoBehaviour
     private Lobby _joinedLobby;
     private float _heartbeatTimer;
     private float _pollTimer;
-    private bool  _isLobbyHost;
-    private bool  _relayCodeReceived;
+    private bool _isLobbyHost;
+    private bool _relayCodeReceived;
 
     private const string KEY_RELAY_CODE = "RelayCode";
 
@@ -118,19 +116,20 @@ public class ConnectionManager : MonoBehaviour
     {
         NetworkManager.Singleton.ConnectionApprovalCallback = ApprovalCheck;
         if (errorText != null) errorText.gameObject.SetActive(false);
+
+        // *** เพิ่ม Handler สำหรับ Transport Failure ***
+        NetworkManager.Singleton.OnTransportFailure += OnTransportFailure;
     }
 
     private void Update()
     {
-        // Keep cursor visible on login / character-select panels
-        if ((loginPanel    != null && loginPanel.activeSelf) ||
+        if ((loginPanel != null && loginPanel.activeSelf) ||
             (characterPanel != null && characterPanel.activeSelf))
         {
             Cursor.lockState = CursorLockMode.None;
-            Cursor.visible   = true;
+            Cursor.visible = true;
         }
 
-        // Lobby heartbeat + polling run every frame (cheap no-ops when not in a lobby)
         HandleLobbyHeartbeat();
         PollLobbyForRelayCode();
     }
@@ -140,8 +139,22 @@ public class ConnectionManager : MonoBehaviour
         _ = LeaveLobbyOnQuit();
     }
 
+    // *** Handle Transport Failure → แจ้งผู้เล่นให้สร้างห้องใหม่ ***
+    private async void OnTransportFailure()
+    {
+        Debug.LogWarning("[ConnectionManager] Transport failure! Shutting down and returning to login.");
+
+        NetworkManager.Singleton.Shutdown();
+        await Task.Delay(1000);
+
+        SetError("Connection lost! Please create a new room.", Color.red);
+        if (loginPanel != null) loginPanel.SetActive(true);
+        if (clientButton != null) clientButton.interactable = true;
+        SetLobbyButtonsInteractable(true);
+    }
+
     // ═════════════════════════════════════════════
-    //  Shared Services Init  (with ParrelSync support)
+    //  Shared Services Init
     // ═════════════════════════════════════════════
     private async Task InitServices()
     {
@@ -150,11 +163,10 @@ public class ConnectionManager : MonoBehaviour
             var initOptions = new InitializationOptions();
 
 #if UNITY_EDITOR
-            // ParrelSync: ให้ Clone ใช้ profile แยก → Player ID ต่างกัน → Quick Join ไม่ติดปัญหา same-account
             if (ParrelSync.ClonesManager.IsClone())
             {
                 string cloneArg = ParrelSync.ClonesManager.GetArgument();
-                string profile  = string.IsNullOrEmpty(cloneArg) ? "Clone" : cloneArg;
+                string profile = string.IsNullOrEmpty(cloneArg) ? "Clone" : cloneArg;
                 initOptions.SetProfile(profile);
                 Debug.Log($"[ConnectionManager] ParrelSync Clone — using profile: {profile}");
             }
@@ -174,16 +186,16 @@ public class ConnectionManager : MonoBehaviour
         string userName = usernameInput.text;
         if (string.IsNullOrWhiteSpace(userName)) { SetError("Please enter a name first", Color.red); return; }
         LocalUsername = userName;
-        _isLeaving    = false;
+        _isLeaving = false;
 
         try
         {
+            // *** แค่ Login ก่อน ยังไม่สร้าง Relay ***
             await InitServices();
-            await ConfigureRelayHost();
         }
         catch (Exception ex)
         {
-            SetError($"Relay host error: {ex.Message}", Color.red);
+            SetError($"Init error: {ex.Message}", Color.red);
             return;
         }
 
@@ -202,9 +214,10 @@ public class ConnectionManager : MonoBehaviour
             SetError("Please enter a name first", Color.red);
             if (clientButton != null) clientButton.interactable = true;
             return;
+
         }
         LocalUsername = userName;
-        _isLeaving    = false;
+        _isLeaving = false;
 
         try
         {
@@ -225,15 +238,23 @@ public class ConnectionManager : MonoBehaviour
 
     private async Task ConfigureRelayHost()
     {
-        Allocation allocation = await RelayService.Instance.CreateAllocationAsync(4);
+        // *** ระบุ Region = Singapore ใกล้ไทยที่สุด ***
+        Allocation allocation = await RelayService.Instance.CreateAllocationAsync(
+            maxConnections: 4,
+            region: "asia-southeast1"
+        );
         _relayJoinCode = await RelayService.Instance.GetJoinCodeAsync(allocation.AllocationId);
 
         if (relayHostJoinCodeText != null)
             relayHostJoinCodeText.text = $"Code : {_relayJoinCode}";
-        Debug.Log($"[ConnectionManager] Relay host code: {_relayJoinCode}");
+        Debug.Log($"[ConnectionManager] Relay host code: {_relayJoinCode} | Region: {RELAY_REGION}");
 
         UnityTransport transport = GetUnityTransport();
         if (transport == null) throw new InvalidOperationException("UnityTransport not found on NetworkManager.");
+
+        // *** เพิ่ม Timeout settings ***
+        transport.MaxConnectAttempts = 3;
+        transport.ConnectTimeoutMS = 5000;
 
         transport.SetHostRelayData(
             allocation.RelayServer.IpV4,
@@ -259,6 +280,10 @@ public class ConnectionManager : MonoBehaviour
         UnityTransport transport = GetUnityTransport();
         if (transport == null) throw new InvalidOperationException("UnityTransport not found on NetworkManager.");
 
+        // *** เพิ่ม Timeout settings ***
+        transport.MaxConnectAttempts = 3;
+        transport.ConnectTimeoutMS = 5000;
+
         transport.SetClientRelayData(
             joinAllocation.RelayServer.IpV4,
             (ushort)joinAllocation.RelayServer.Port,
@@ -269,7 +294,7 @@ public class ConnectionManager : MonoBehaviour
         );
     }
 
-    // ─── Character Selection (Direct Relay flow) ───
+    // ─── Character Selection ───
     private void ShowCharacterSelection(bool show)
     {
         if (characterPanel == null) return;
@@ -286,7 +311,8 @@ public class ConnectionManager : MonoBehaviour
         }
     }
 
-    public void OnCharacterSelected(int charIndex)
+    // *** ย้ายการสร้าง Relay มาอยู่ตรงนี้ → สร้างแล้ว StartHost ทันที ไม่มี delay ***
+    public async void OnCharacterSelected(int charIndex)
     {
         _pendingCharIndex = charIndex;
         SetConnectionData(LocalUsername, charIndex);
@@ -294,7 +320,21 @@ public class ConnectionManager : MonoBehaviour
         if (_startAsHost)
         {
             _hostCharIndex = charIndex;
-            NetworkManager.Singleton.StartHost();
+            ShowCharacterSelection(false);
+
+            try
+            {
+                SetError("Creating room...", Color.yellow);
+                // *** สร้าง Relay ตรงนี้เลย แล้ว StartHost ทันที ***
+                await ConfigureRelayHost();
+                NetworkManager.Singleton.StartHost();
+                ClearError();
+            }
+            catch (Exception ex)
+            {
+                SetError($"Relay host error: {ex.Message}", Color.red);
+                ShowCharacterSelection(true); // ← เปิดกลับถ้า error
+            }
         }
         else
         {
@@ -302,9 +342,8 @@ public class ConnectionManager : MonoBehaviour
             var transport = NetworkManager.Singleton.NetworkConfig.NetworkTransport as UnityTransport;
             if (transport != null) transport.MaxConnectAttempts = 2;
             NetworkManager.Singleton.StartClient();
+            ShowCharacterSelection(false);
         }
-
-        ShowCharacterSelection(false);
     }
 
     public int GetSelectedCharIndex() => _pendingCharIndex;
@@ -324,12 +363,14 @@ public class ConnectionManager : MonoBehaviour
         {
             await InitServices();
 
-            // 1. Create Relay allocation
-            Allocation allocation    = await RelayService.Instance.CreateAllocationAsync(maxPlayers - 1);
-            string     relayJoinCode = await RelayService.Instance.GetJoinCodeAsync(allocation.AllocationId);
-            Debug.Log($"[ConnectionManager] Lobby Relay code: {relayJoinCode}");
+            // *** ระบุ Region = Singapore ***
+            Allocation allocation = await RelayService.Instance.CreateAllocationAsync(
+                maxConnections: maxPlayers - 1,
+                region: "asia-southeast1"
+            );
+            string relayJoinCode = await RelayService.Instance.GetJoinCodeAsync(allocation.AllocationId);
+            Debug.Log($"[ConnectionManager] Lobby Relay code: {relayJoinCode} | Region: {RELAY_REGION}");
 
-            // 2. Create Lobby — embed Relay code as Public so Quick Join can find it
             _hostedLobby = await LobbyService.Instance.CreateLobbyAsync(
                 lobbyName, maxPlayers,
                 new CreateLobbyOptions
@@ -348,8 +389,12 @@ public class ConnectionManager : MonoBehaviour
             if (lobbyCodeDisplayText != null)
                 lobbyCodeDisplayText.text = $"Lobby Code: {_hostedLobby.LobbyCode}";
 
-            // 3. Configure Transport as Host
             UnityTransport transport = GetUnityTransport();
+
+            // *** เพิ่ม Timeout settings ***
+            transport.MaxConnectAttempts = 3;
+            transport.ConnectTimeoutMS = 5000;
+
             transport.SetHostRelayData(
                 allocation.RelayServer.IpV4,
                 (ushort)allocation.RelayServer.Port,
@@ -358,7 +403,6 @@ public class ConnectionManager : MonoBehaviour
                 allocation.ConnectionData
             );
 
-            // 4. Start Host
             LocalUsername_Set(userName);
             SetConnectionData(userName, 0);
             NetworkManager.Singleton.StartHost();
@@ -379,7 +423,6 @@ public class ConnectionManager : MonoBehaviour
         string userName = usernameInput != null ? usernameInput.text.Trim() : "";
         if (string.IsNullOrWhiteSpace(userName)) { ShowStatus("Please enter a username first.", Color.red); return; }
 
-        // ถ้ากรอก Lobby Code → join ด้วย code, ถ้าว่าง → Quick Join อัตโนมัติ
         string lobbyCode = lobbyJoinCodeInput != null ? lobbyJoinCodeInput.text.Trim() : "";
 
         SetLobbyButtonsInteractable(false);
@@ -392,13 +435,11 @@ public class ConnectionManager : MonoBehaviour
 
             if (!string.IsNullOrWhiteSpace(lobbyCode))
             {
-                // Join by Lobby Code
                 Debug.Log($"[ConnectionManager] Joining with Lobby code: {lobbyCode}");
                 _joinedLobby = await LobbyService.Instance.JoinLobbyByCodeAsync(lobbyCode);
             }
             else
             {
-                // Quick Join with retry (รอให้ Host สร้าง Lobby เสร็จก่อน)
                 const int maxRetries = 5;
                 for (int attempt = 1; attempt <= maxRetries; attempt++)
                 {
@@ -406,21 +447,20 @@ public class ConnectionManager : MonoBehaviour
                     {
                         Debug.Log($"[ConnectionManager] Quick Join attempt {attempt}/{maxRetries}...");
                         _joinedLobby = await LobbyService.Instance.QuickJoinLobbyAsync();
-                        break; // สำเร็จ
+                        break;
                     }
                     catch (LobbyServiceException e) when
                         (e.Reason == LobbyExceptionReason.NoOpenLobbies && attempt < maxRetries)
                     {
                         ShowStatus($"Searching... ({attempt}/{maxRetries})", Color.yellow);
-                        await Task.Delay(2000); // รอ 2 วิ แล้วลองใหม่
+                        await Task.Delay(2000);
                     }
-                    // attempt สุดท้าย → ปล่อย exception ขึ้นไปให้ catch หลักจัดการ
                 }
             }
 
-            _isLobbyHost       = false;
+            _isLobbyHost = false;
             _relayCodeReceived = false;
-            _pollTimer         = 0f;
+            _pollTimer = 0f;
             ShowStatus("Joined Lobby! Waiting for Relay code...", Color.yellow);
             Debug.Log($"[ConnectionManager] Joined Lobby: {_joinedLobby.Id}");
         }
@@ -432,7 +472,6 @@ public class ConnectionManager : MonoBehaviour
         }
     }
 
-    // ─── Lobby Heartbeat (ping ทุก 25 วิ กัน timeout) ───
     private async void HandleLobbyHeartbeat()
     {
         if (_hostedLobby == null) return;
@@ -441,12 +480,11 @@ public class ConnectionManager : MonoBehaviour
         if (_heartbeatTimer >= 25f)
         {
             _heartbeatTimer = 0f;
-            try   { await LobbyService.Instance.SendHeartbeatPingAsync(_hostedLobby.Id); }
+            try { await LobbyService.Instance.SendHeartbeatPingAsync(_hostedLobby.Id); }
             catch (Exception e) { Debug.LogWarning($"[ConnectionManager] Heartbeat failed: {e.Message}"); }
         }
     }
 
-    // ─── Poll Lobby Data — Client รอรับ Relay Code จาก Lobby ───
     private async void PollLobbyForRelayCode()
     {
         if (_joinedLobby == null || _isLobbyHost || _relayCodeReceived) return;
@@ -478,6 +516,11 @@ public class ConnectionManager : MonoBehaviour
         {
             JoinAllocation joinAllocation = await RelayService.Instance.JoinAllocationAsync(relayCode);
             UnityTransport transport = GetUnityTransport();
+
+            // *** เพิ่ม Timeout settings ***
+            transport.MaxConnectAttempts = 3;
+            transport.ConnectTimeoutMS = 5000;
+
             transport.SetClientRelayData(
                 joinAllocation.RelayServer.IpV4,
                 (ushort)joinAllocation.RelayServer.Port,
@@ -502,7 +545,6 @@ public class ConnectionManager : MonoBehaviour
         }
     }
 
-    // ─── Lobby Cleanup ───
     public async void LeaveLobby()
     {
         try
@@ -543,9 +585,9 @@ public class ConnectionManager : MonoBehaviour
     {
         if (request.ClientNetworkId == NetworkManager.ServerClientId)
         {
-            response.Approved         = true;
+            response.Approved = true;
             response.CreatePlayerObject = true;
-            response.Pending          = false;
+            response.Pending = false;
             response.PlayerPrefabHash = GetPlayerPrefabHashFromCharacterId(_hostCharIndex);
 
             GetSpawnPositionAndRotation(_hostCharIndex, out Vector3 hostPos, out Quaternion hostRot);
@@ -559,20 +601,20 @@ public class ConnectionManager : MonoBehaviour
         if (!TryParseConnectionPayload(request.Payload, out string incomingName, out int incomingChar))
         {
             response.Approved = false;
-            response.Reason   = "Invalid payload";
-            response.Pending  = false;
+            response.Reason = "Invalid payload";
+            response.Pending = false;
             return;
         }
 
         if (_connectedNames.Contains(incomingName))
         {
             response.Approved = false;
-            response.Reason   = "Name already in use";
-            response.Pending  = false;
+            response.Reason = "Name already in use";
+            response.Pending = false;
             return;
         }
 
-        response.Approved         = true;
+        response.Approved = true;
         response.CreatePlayerObject = true;
         response.PlayerPrefabHash = GetPlayerPrefabHashFromCharacterId(incomingChar);
 
@@ -599,18 +641,19 @@ public class ConnectionManager : MonoBehaviour
     private void OnEnable()
     {
         if (NetworkManager.Singleton == null) return;
-        NetworkManager.Singleton.OnServerStarted          += HandleServerStarted;
-        NetworkManager.Singleton.OnClientConnectedCallback  += HandleClientConnected;
+        NetworkManager.Singleton.OnServerStarted += HandleServerStarted;
+        NetworkManager.Singleton.OnClientConnectedCallback += HandleClientConnected;
         NetworkManager.Singleton.OnClientDisconnectCallback += HandleClientDisconnected;
     }
 
     private void OnDisable()
     {
         if (NetworkManager.Singleton == null) return;
-        NetworkManager.Singleton.ConnectionApprovalCallback  = null;
-        NetworkManager.Singleton.OnServerStarted            -= HandleServerStarted;
-        NetworkManager.Singleton.OnClientConnectedCallback   -= HandleClientConnected;
-        NetworkManager.Singleton.OnClientDisconnectCallback  -= HandleClientDisconnected;
+        NetworkManager.Singleton.ConnectionApprovalCallback = null;
+        NetworkManager.Singleton.OnTransportFailure -= OnTransportFailure;
+        NetworkManager.Singleton.OnServerStarted -= HandleServerStarted;
+        NetworkManager.Singleton.OnClientConnectedCallback -= HandleClientConnected;
+        NetworkManager.Singleton.OnClientDisconnectCallback -= HandleClientDisconnected;
     }
 
     private void HandleServerStarted()
@@ -627,12 +670,16 @@ public class ConnectionManager : MonoBehaviour
 
     private void HandleClientDisconnected(ulong clientId)
     {
-        if (clientId == NetworkManager.Singleton.LocalClientId || clientId == 0)
+        //if (clientId == NetworkManager.Singleton.LocalClientId || clientId == 0)
+         bool isLocalClient = clientId == NetworkManager.Singleton.LocalClientId;
+            bool isServerDisconnected = !NetworkManager.Singleton.IsServer && clientId == 0;
+
+    if (isLocalClient || isServerDisconnected)
         {
             Cursor.lockState = CursorLockMode.None;
-            Cursor.visible   = true;
+            Cursor.visible = true;
 
-            if (clientButton  != null) clientButton.interactable = true;
+            if (clientButton != null) clientButton.interactable = true;
             if (characterPanel != null) characterPanel.SetActive(false);
 
             if (LobbyManager.Instance != null && LobbyManager.Instance.lobbyPanel != null)
@@ -765,7 +812,7 @@ public class ConnectionManager : MonoBehaviour
 
     private bool TryParseConnectionPayload(ArraySegment<byte> payload, out string username, out int characterId)
     {
-        username    = "";
+        username = "";
         characterId = 0;
 
         string decoded = DecodePayloadToString(payload);
@@ -787,18 +834,17 @@ public class ConnectionManager : MonoBehaviour
 
     private void SetLobbyButtonsInteractable(bool interactable)
     {
-        if (lobbyHostButton   != null) lobbyHostButton.interactable   = interactable;
+        if (lobbyHostButton != null) lobbyHostButton.interactable = interactable;
         if (lobbyClientButton != null) lobbyClientButton.interactable = interactable;
     }
 
-    /// <summary>แสดงสถานะ Lobby — ใช้ lobbyStatusText ถ้ามี ไม่งั้น fallback ไป errorText</summary>
     private void ShowStatus(string msg, Color color)
     {
         Debug.Log($"[LobbyStatus] {msg}");
         if (lobbyStatusText != null)
         {
             lobbyStatusText.gameObject.SetActive(true);
-            lobbyStatusText.text  = msg;
+            lobbyStatusText.text = msg;
             lobbyStatusText.color = color;
             return;
         }
@@ -807,7 +853,7 @@ public class ConnectionManager : MonoBehaviour
 
     private void SetUIConnected(bool connected)
     {
-        if (loginPanel  != null) loginPanel.SetActive(!connected);
+        if (loginPanel != null) loginPanel.SetActive(!connected);
         if (leaveButton != null) leaveButton.SetActive(connected);
         if (connected) ClearError();
     }
@@ -817,7 +863,7 @@ public class ConnectionManager : MonoBehaviour
         if (errorText != null)
         {
             errorText.gameObject.SetActive(true);
-            errorText.text  = message;
+            errorText.text = message;
             errorText.color = color;
         }
         Debug.LogWarning(message);
@@ -838,7 +884,7 @@ public class ConnectionManager : MonoBehaviour
         if (clientButton != null) clientButton.interactable = true;
         if (lobbyHostButton != null) lobbyHostButton.interactable = true;
         if (lobbyClientButton != null) lobbyClientButton.interactable = true;
-        
+
         if (QuickJoinSessionManager.Instance != null)
         {
             if (QuickJoinSessionManager.Instance.StartButton != null)
@@ -846,7 +892,6 @@ public class ConnectionManager : MonoBehaviour
             await QuickJoinSessionManager.Instance.LeaveAndCleanup();
         }
 
-        // Call the built-in leave lobby for ConnectionManager's own lobbies
         LeaveLobby();
 
         if (NetworkManager.Singleton == null) return;
